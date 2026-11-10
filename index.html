@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kẻ Kiến Tạo Vũ Trụ - Cosmic Evolution</title>
+    <style>
+        :root {
+            --bg: #0b0c10;
+            --panel: #1f2833;
+            --text: #66fcf1;
+            --text-muted: #c5c6c7;
+            --btn: #45a29e;
+            --btn-hover: #66fcf1;
+            --gold: #ffd700;
+        }
+        body {
+            margin: 0; padding: 0;
+            background-color: var(--bg); color: var(--text-muted);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex; height: 100vh; overflow: hidden;
+            user-select: none;
+        }
+
+        /* KHU VỰC ĐỒ HỌA VŨ TRỤ */
+        #universe {
+            flex: 2; position: relative; background: #000;
+            box-shadow: inset -10px 0 20px rgba(0,0,0,0.8);
+        }
+        canvas { display: block; width: 100%; height: 100%; cursor: pointer; }
+
+        /* GIAO DIỆN CHƠI (UI) */
+        #ui-panel {
+            flex: 1; min-width: 350px; max-width: 450px; background: var(--panel);
+            padding: 20px; display: flex; flex-direction: column; gap: 15px;
+            box-sizing: border-box; overflow-y: auto; border-left: 2px solid var(--btn);
+        }
+        h1 { margin: 0; color: var(--text); text-align: center; text-transform: uppercase; font-size: 24px; text-shadow: 0 0 10px var(--text); }
+        .stats {
+            background: rgba(0,0,0,0.5); padding: 15px; border-radius: 8px; text-align: center;
+            border: 1px solid var(--btn);
+        }
+        .dust-count { font-size: 32px; font-weight: bold; color: var(--gold); text-shadow: 0 0 15px var(--gold); margin: 5px 0;}
+        .cps { font-size: 14px; color: #aaa; }
+
+        .evolve-btn {
+            background: linear-gradient(45deg, #ff007f, #7f00ff);
+            color: white; border: none; padding: 15px; font-size: 18px; font-weight: bold;
+            border-radius: 8px; cursor: pointer; transition: 0.3s;
+            box-shadow: 0 0 15px rgba(255, 0, 127, 0.5); text-transform: uppercase;
+        }
+        .evolve-btn:hover:not(:disabled) { transform: scale(1.02); box-shadow: 0 0 25px rgba(255, 0, 127, 0.8); }
+        .evolve-btn:disabled { background: #333; color: #777; box-shadow: none; cursor: not-allowed; }
+
+        h3 { margin: 10px 0 5px 0; color: var(--text); border-bottom: 1px solid var(--btn); padding-bottom: 5px; }
+
+        .upgrade {
+            display: flex; justify-content: space-between; align-items: center;
+            background: rgba(0,0,0,0.3); padding: 10px 15px; border-radius: 6px;
+            border: 1px solid transparent; transition: 0.2s; cursor: pointer;
+        }
+        .upgrade:hover:not(.disabled) { border-color: var(--text); background: rgba(0,0,0,0.6); }
+        .upgrade.disabled { opacity: 0.5; cursor: not-allowed; }
+        .upgrade-info strong { color: white; display: block; font-size: 16px; }
+        .upgrade-info span { font-size: 12px; color: #888; }
+        .upgrade-cost { font-weight: bold; color: var(--gold); }
+        .upgrade-count { font-size: 18px; font-weight: bold; color: var(--btn); width: 30px; text-align: right; }
+
+        /* Hiệu ứng nổi lên khi click */
+        .click-text {
+            position: absolute; color: white; font-weight: bold; font-size: 18px;
+            pointer-events: none; animation: floatUp 1s forwards ease-out; text-shadow: 0 0 5px var(--gold);
+        }
+        @keyframes floatUp { 0% { opacity: 1; transform: translateY(0) scale(1); } 100% { opacity: 0; transform: translateY(-50px) scale(1.5); } }
+
+    </style>
+</head>
+<body>
+
+    <div id="universe">
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+    <div id="ui-panel">
+        <h1>Bậc Thầy Kiến Tạo</h1>
+        
+        <div class="stats">
+            <div style="font-size: 18px; color: white;" id="uiTierName">Thiên Thể: Đá Vũ Trụ</div>
+            <div class="dust-count" id="uiDust">0</div>
+            <div style="font-size: 14px; color: #fff;">Bụi Không Gian (CD)</div>
+            <div class="cps" id="uiCps">Tự động: 0 CD/giây</div>
+        </div>
+
+        <button class="evolve-btn" id="btnEvolve" onclick="evolve()" disabled>
+            Tiến hóa (Cần <span id="evolveCost">100</span> CD)
+        </button>
+
+        <h3>Vệ Tinh Thu Thập Bụi</h3>
+        <div id="upgrades-container">
+            <!-- Upgrades sinh ra bằng JS -->
+        </div>
+        
+        <div style="margin-top: auto; font-size: 12px; color: #555; text-align: center;">
+            <p>Click vào thiên thể để hút Bụi.<br>Đạt đến cảnh giới Thiên Hà để chiến thắng!</p>
+        </div>
+    </div>
+
+<script>
+    // --- HỆ THỐNG ÂM THANH ---
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    let audioCtx;
+
+    function playSound(type) {
+        if (!audioCtx) audioCtx = new AudioContext();
+        let t = audioCtx.currentTime;
+        let osc = audioCtx.createOscillator();
+        let g = audioCtx.createGain();
+        osc.connect(g); g.connect(audioCtx.destination);
+
+        if (type === 'click') {
+            osc.type = 'sine'; osc.frequency.setValueAtTime(800 + Math.random()*200, t);
+            g.gain.setValueAtTime(0.1, t); osc.start(t); osc.stop(t + 0.1);
+        } else if (type === 'buy') {
+            osc.type = 'square'; osc.frequency.setValueAtTime(400, t); osc.frequency.setValueAtTime(600, t+0.1);
+            g.gain.setValueAtTime(0.1, t); osc.start(t); osc.stop(t + 0.2);
+        } else if (type === 'evolve') {
+            // Âm thanh vĩ đại bùng nổ
+            osc.type = 'sawtooth'; osc.frequency.setValueAtTime(100, t); osc.frequency.exponentialRampToValueAtTime(800, t + 1.5);
+            g.gain.setValueAtTime(0.5, t); g.gain.exponentialRampToValueAtTime(0.01, t + 2);
+            osc.start(t); osc.stop(t + 2);
+        }
+    }
+
+    // --- DỮ LIỆU TRÒ CHƠI ---
+    let dust = 0;
+    let totalCps = 0; // Cosmic dust per second
+    let clickPower = 1;
+    let currentTier = 0;
+
+    // Các Bậc Tiến Hóa Thiên Thể
+    const tiers = [
+        { name: "Cục Đá Vũ Trụ",   color: "#7f8c8d", size: 20,  glow: 0,   cost: 50 },
+        { name: "Tiểu Hành Tinh",  color: "#a67c52", size: 35,  glow: 5,   cost: 500 },
+        { name: "Hành Tinh Lùn",   color: "#3498db", size: 50,  glow: 10,  cost: 5000 },
+        { name: "Hành Tinh Sống",  color: "#2ecc71", size: 70,  glow: 15,  cost: 50000 },
+        { name: "Hành Tinh Khí",   color: "#e67e22", size: 100, glow: 20,  cost: 1000000 },
+        { name: "Ngôi Sao Trẻ",    color: "#f1c40f", size: 120, glow: 40,  cost: 50000000 },
+        { name: "Sao Khổng Lồ Đỏ", color: "#e74c3c", size: 160, glow: 60,  cost: 2000000000 },
+        { name: "Sao Xung Pulsar", color: "#9b59b6", size: 40,  glow: 100, cost: 50000000000 },
+        { name: "Lỗ Đen Tinh Tú",  color: "#000000", size: 80,  glow: 150, cost: 1000000000000 },
+        { name: "Thiên Hà Siêu Việt", color: "galaxy", size: 200, glow: 200, cost: Infinity }
+    ];
+
+    // Cửa hàng vệ tinh tự động
+    const upgrades = [
+        { id: 'u1', name: 'Vành Đai Bụi', desc: '+1 CD/s', baseCost: 15, cps: 1, count: 0, color: '#aaa' },
+        { id: 'u2', name: 'Mặt Trăng', desc: '+10 CD/s', baseCost: 150, cps: 10, count: 0, color: '#ccc' },
+        { id: 'u3', name: 'Hành Tinh Vệ Tinh', desc: '+80 CD/s', baseCost: 1200, cps: 80, count: 0, color: '#3498db' },
+        { id: 'u4', name: 'Trạm Không Gian', desc: '+500 CD/s', baseCost: 15000, cps: 500, count: 0, color: '#e74c3c' },
+        { id: 'u5', name: 'Hệ Sao Kép', desc: '+4,000 CD/s', baseCost: 200000, cps: 4000, count: 0, color: '#f1c40f' }
+    ];
+
+    // --- RENDER UI ---
+    function formatNumber(num) {
+        if (num >= 1e12) return (num/1e12).toFixed(2) + " T (Nghìn Tỷ)";
+        if (num >= 1e9) return (num/1e9).toFixed(2) + " B (Tỷ)";
+        if (num >= 1e6) return (num/1e6).toFixed(2) + " M (Triệu)";
+        return Math.floor(num).toLocaleString();
+    }
+
+    function initUpgradesUI() {
+        const container = document.getElementById('upgrades-container');
+        container.innerHTML = '';
+        upgrades.forEach((u, index) => {
+            let cost = getUpgradeCost(index);
+            container.innerHTML += `
+                <div class="upgrade" id="upg-${index}" onclick="buyUpgrade(${index})">
+                    <div class="upgrade-info">
+                        <strong>${u.name}</strong>
+                        <span>${u.desc}</span>
+                    </div>
+                    <div class="upgrade-cost" id="upg-cost-${index}">${formatNumber(cost)}</div>
+                    <div class="upgrade-count" id="upg-count-${index}">0</div>
+                </div>
+            `;
+        });
+    }
+
+    function getUpgradeCost(index) {
+        return Math.floor(upgrades[index].baseCost * Math.pow(1.15, upgrades[index].count));
+    }
+
+    function buyUpgrade(index) {
+        let cost = getUpgradeCost(index);
+        if (dust >= cost) {
+            playSound('buy');
+            dust -= cost;
+            upgrades[index].count++;
+            recalculateCPS();
+            updateUI();
+        }
+    }
+
+    function recalculateCPS() {
+        totalCps = upgrades.reduce((sum, u) => sum + (u.cps * u.count), 0);
+        // Mỗi cấp tiến hóa x2 sức click
+        clickPower = Math.pow(2, currentTier); 
+    }
+
+    function evolve() {
+        let cost = tiers[currentTier].cost;
+        if (dust >= cost && currentTier < tiers.length - 1) {
+            playSound('evolve');
+            dust -= cost;
+            currentTier++;
+            
+            // Hiệu ứng pháo hoa vũ trụ
+            createExplosion(canvas.width/2, canvas.height/2, 100);
+
+            recalculateCPS();
+            updateUI();
+        }
+    }
+
+    function updateUI() {
+        document.getElementById('uiDust').innerText = formatNumber(dust);
+        document.getElementById('uiCps').innerText = `Tự động: ${formatNumber(totalCps)} CD/giây`;
+        
+        let t = tiers[currentTier];
+        document.getElementById('uiTierName').innerText = `Thiên Thể: ${t.name}`;
+        
+        let btnEvolve = document.getElementById('btnEvolve');
+        if (currentTier >= tiers.length - 1) {
+            btnEvolve.innerText = "CẢNH GIỚI TỐI ĐA!";
+            btnEvolve.disabled = true;
+        } else {
+            btnEvolve.innerText = `Tiến hóa (Cần ${formatNumber(t.cost)} CD)`;
+            btnEvolve.disabled = (dust < t.cost);
+        }
+
+        // Cập nhật Cửa hàng
+        upgrades.forEach((u, i) => {
+            let cost = getUpgradeCost(i);
+            document.getElementById(`upg-cost-${i}`).innerText = formatNumber(cost);
+            document.getElementById(`upg-count-${i}`).innerText = u.count;
+            
+            let upgDiv = document.getElementById(`upg-${i}`);
+            if (dust >= cost) upgDiv.classList.remove('disabled');
+            else upgDiv.classList.add('disabled');
+        });
+    }
+
+    // --- CANVAS GRAPHICS ---
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    function resize() {
+        canvas.width = document.getElementById('universe').clientWidth;
+        canvas.height = document.getElementById('universe').clientHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // Nền sao
+    const stars = Array.from({length: 150}).map(() => ({
+        x: Math.random(), y: Math.random(), 
+        size: Math.random() * 2, speed: Math.random() * 0.05
+    }));
+
+    let particles = [];
+    
+    // Tương tác Click lên Canvas (Tạo bụi)
+    canvas.addEventListener('mousedown', (e) => {
+        if(!audioCtx) initUpgradesUI(); // Khởi tạo nếu chưa
+        playSound('click');
+        dust += clickPower;
+        
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+
+        // Bắn bụi sáng ra ngoài
+        for(let i=0; i<3; i++) {
+            particles.push({
+                x: mx, y: my,
+                vx: (Math.random()-0.5)*5, vy: (Math.random()-0.5)*5,
+                life: 1, color: varColor(tiers[currentTier].color)
+            });
+        }
+
+        // Số nổi
+        createFloatingText(mx, my, `+${formatNumber(clickPower)}`);
+        
+        updateUI();
+    });
+
+    function createExplosion(x, y, count) {
+        for(let i=0; i<count; i++) {
+            particles.push({
+                x: x, y: y,
+                vx: (Math.random()-0.5)*15, vy: (Math.random()-0.5)*15,
+                life: 1, color: `hsl(${Math.random()*360}, 100%, 50%)`
+            });
+        }
+    }
+
+    function createFloatingText(x, y, text) {
+        const span = document.createElement('div');
+        span.innerText = text;
+        span.className = 'click-text';
+        span.style.left = x + 'px';
+        span.style.top = y + 'px';
+        document.getElementById('universe').appendChild(span);
+        setTimeout(() => span.remove(), 1000);
+    }
+
+    function varColor(base) {
+        if(base === 'galaxy' || base === '#000000') return `hsl(${Math.random()*360}, 100%, 50%)`;
+        return base;
+    }
+
+    let time = 0;
+
+    function draw() {
+        time += 0.01;
+        // Xóa mờ để tạo vệt
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2;
+
+        // Vẽ nền sao lấp lánh
+        ctx.fillStyle = '#fff';
+        stars.forEach(s => {
+            let sx = s.x * canvas.width;
+            let sy = (s.y * canvas.height + time * s.speed * 1000) % canvas.height;
+            ctx.globalAlpha = Math.random() * 0.5 + 0.5;
+            ctx.beginPath(); ctx.arc(sx, sy, s.size, 0, Math.PI*2); ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+
+        // Vẽ các Vệ tinh quay quanh
+        upgrades.forEach((u, i) => {
+            if (u.count > 0) {
+                let radius = 100 + i * 40; // Quỹ đạo
+                let speed = time * (1 + (5-i)*0.2); // Tốc độ quay khác nhau
+                ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+                ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI*2); ctx.stroke();
+
+                // Số lượng chấm trên quỹ đạo (Max 15 cái cho đỡ lag)
+                let renderCount = Math.min(u.count, 15);
+                for(let j=0; j<renderCount; j++) {
+                    let angle = speed + (j * (Math.PI*2 / renderCount));
+                    let ox = cx + Math.cos(angle) * radius;
+                    let oy = cy + Math.sin(angle) * radius;
+                    
+                    ctx.fillStyle = u.color;
+                    ctx.beginPath(); ctx.arc(ox, oy, 3 + i, 0, Math.PI*2); ctx.fill();
+                    
+                    // Nếu là hệ sao kép, vẽ thêm hào quang
+                    if(i === 4) {
+                        ctx.shadowBlur = 10; ctx.shadowColor = u.color;
+                        ctx.fill(); ctx.shadowBlur = 0;
+                    }
+                }
+            }
+        });
+
+        // Vẽ CỤC ĐÁ / THIÊN THỂ TRUNG TÂM
+        const currentData = tiers[currentTier];
+        ctx.shadowBlur = currentData.glow;
+        ctx.shadowColor = (currentData.color === '#000000') ? '#8e44ad' : (currentData.color === 'galaxy' ? '#fff' : currentData.color);
+
+        // Nhịp đập nhẹ
+        let scale = 1 + Math.sin(time * 5) * 0.05;
+        let r = currentData.size * scale;
+
+        if (currentData.color === 'galaxy') {
+            // Vẽ thiên hà xoắn ốc
+            for(let i=0; i<400; i++) {
+                let a = i * 0.1 + time;
+                let rad = (i/400) * r;
+                let gx = cx + Math.cos(a) * rad;
+                let gy = cy + Math.sin(a) * rad;
+                ctx.fillStyle = `hsl(${(i + time*100) % 360}, 100%, 60%)`;
+                ctx.fillRect(gx, gy, 2, 2);
+            }
+        } else if (currentData.color === '#000000') {
+            // Lỗ đen: có vòng tròn phát sáng xung quanh (Accretion disk)
+            ctx.fillStyle = 'black';
+            ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.fill();
+            
+            ctx.beginPath();
+            ctx.ellipse(cx, cy, r * 2, r * 0.5, time, 0, Math.PI*2);
+            ctx.strokeStyle = 'rgba(255, 100, 0, 0.8)'; ctx.lineWidth = 10; ctx.stroke();
+        } else {
+            // Hành tinh/Sao bình thường
+            ctx.fillStyle = currentData.color;
+            ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.fill();
+            
+            // Vẽ vân đá cho cục đá/tiểu hành tinh
+            if (currentTier < 3) {
+                ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                ctx.beginPath(); ctx.arc(cx - r*0.3, cy - r*0.3, r*0.2, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(cx + r*0.4, cy + r*0.1, r*0.15, 0, Math.PI*2); ctx.fill();
+            }
+        }
+        ctx.shadowBlur = 0;
+
+        // Vẽ Hạt (Particles) bụi nổ ra
+        for(let i = particles.length - 1; i >= 0; i--) {
+            let p = particles[i];
+            p.x += p.vx; p.y += p.vy;
+            p.life -= 0.02;
+            if(p.life <= 0) { particles.splice(i, 1); continue; }
+            
+            ctx.globalAlpha = p.life;
+            ctx.fillStyle = p.color;
+            ctx.fillRect(p.x, p.y, 4, 4);
+        }
+        ctx.globalAlpha = 1;
+    }
+
+    // --- VÒNG LẶP GAME TỰ ĐỘNG ---
+    let lastTime = Date.now();
+    function gameLoop() {
+        let now = Date.now();
+        let dt = (now - lastTime) / 1000;
+        lastTime = now;
+
+        // Sinh bụi tự động từ các vệ tinh
+        if (totalCps > 0) {
+            dust += totalCps * dt;
+            updateUI(); // Cập nhật lại số tiền
+        }
+
+        draw();
+        requestAnimationFrame(gameLoop);
+    }
+
+    // Khởi tạo
+    initUpgradesUI();
+    updateUI();
+    requestAnimationFrame(gameLoop);
+
+</script>
+</body>
+</html>
